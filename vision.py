@@ -46,7 +46,7 @@ Output ONE JSON object with EXACTLY these keys. Omit nothing, invent no extra ke
     "health": int,           // hero HP shown near hero portrait, e.g. 22
     "tier": int,             // current tavern tier (1-6), shown as roman/star badges near tavern
     "gold": int,             // current gold, shown bottom-right, e.g. 7
-    "tavern_bought": int,    // number of shop refreshes used this turn (default 0 if unclear)
+    "tavern_bought": int,    // number of shop purchases this turn (hard to read from screenshot, default 0)
     "tavern_frozen": bool,   // true if shop shows a "frozen" indicator
     "hero_power": str        // hero name shown near hero portrait, e.g. "Trade Prince Gallywix"
   },
@@ -98,12 +98,17 @@ def _repair_vlm_json(text: str) -> dict[str, Any]:
     3. Scan for the largest balanced ``{...}`` substring and retry.
     Raises ``RuntimeError`` with a snippet if all attempts fail.
     """
-    # 1. direct
+    # 1. direct (some providers return a pre-parsed object when
+    # response_format=json_object is set — accept dicts as-is)
+    if isinstance(text, dict):
+        return text
+    if not isinstance(text, str):
+        text = str(text)
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
             return obj
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         pass
 
     # 2. strip code fences

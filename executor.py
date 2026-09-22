@@ -32,8 +32,10 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -248,6 +250,99 @@ class ActionLog:
     detail: str = ""
     coords: tuple[float, float] | None = None   # logical screen coords (click mode)
     executed: bool = False
+
+
+# --------------------------------------------------------------------------- #
+# Run recorder — archive every frame + decision + action for later review
+# --------------------------------------------------------------------------- #
+
+class RunRecorder:
+    """Screen-video recording + JSONL events + text log in one timestamped dir.
+
+    Video uses macOS native ``screencapture -v`` (macOS 15+). Usage: create
+    once per run, :meth:`start_video` before the loop, :meth:`event` at each
+    step, :meth:`stop_video` in a finally block. Default root:
+    ``~/.ace_champion/recordings/<ts>/``.
+    """
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        if path is None:
+            path = Path.home() / ".ace_champion" / "recordings" / datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.dir = Path(path)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.events_path = self.dir / "events.jsonl"
+        self._chunk_seconds = 30
+        self._video_stop = threading.Event()
+        self._video_thread: threading.Thread | None = None
+        self._video_proc: subprocess.Popen | None = None
+
+    # ------------------------------------------------------------------ #
+    # Video (native screencapture -v, chunked, no extra deps)
+    # ------------------------------------------------------------------ #
+
+    def start_video(self, chunk_seconds: int | None = None) -> None:
+        """Start chunked full-screen video recording in a background thread.
+
+        macOS ``screencapture -v`` only finalizes the .mov when it reaches its
+        ``-V`` duration cap — SIGINT/SIGTERM discard the file. So we record in
+        consecutive chunks (default 30 s, ``ACE_RECORD_CHUNK`` env), each
+        finalized naturally, producing ``screen_recording_001.mov`` etc.
+        """
+        self._chunk_seconds = chunk_seconds or int(os.environ.get("ACE_RECORD_CHUNK", "30"))
+        self._video_stop = threading.Event()
+        self._video_thread = threading.Thread(target=self._video_worker, daemon=True)
+        self._video_thread.start()
+
+    def _video_worker(self) -> None:
+        idx = 1
+        while not self._video_stop.is_set():
+            seg = self.dir / f"screen_recording_{idx:03d}.mov"
+            proc = subprocess.Popen(
+                ["screencapture", "-v", "-V", str(self._chunk_seconds), str(seg)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._video_proc = proc
+            proc.wait()  # natural completion finalizes the segment
+            if self._video_stop.is_set():
+                break
+            if seg.exists():
+                logger.info("Segment saved: %s (%d bytes)", seg.name, seg.stat().st_size)
+            idx += 1
+        logger.info("Video worker exiting after %d segment(s)", idx)
+
+    def stop_video(self, wait_for_current_chunk: bool = True) -> None:
+        """Stop recording. Waits for the in-flight chunk to finalize naturally
+        (up to chunk_seconds + 10 s) so no footage is lost; force-kills after."""
+        if not getattr(self, "_video_thread", None):
+            return
+        self._video_stop.set()
+        if wait_for_current_chunk:
+            self._video_thread.join(timeout=self._chunk_seconds + 10)
+        if self._video_thread.is_alive() and self._video_proc and self._video_proc.poll() is None:
+            self._video_proc.terminate()
+            self._video_proc.wait(timeout=10)
+        self._video_thread = None
+        self._video_proc = None
+
+    # ------------------------------------------------------------------ #
+    # Structured events + log mirror
+    # ------------------------------------------------------------------ #
+
+    def event(self, **data: Any) -> None:
+        """Append one JSONL event (decision, actions, phase gate, errors...)."""
+        data["ts"] = datetime.now().isoformat(timespec="milliseconds")
+        try:
+            with self.events_path.open("a") as f:
+                f.write(json.dumps(data, ensure_ascii=False, default=str) + "\n")
+        except OSError as exc:
+            logger.warning("Could not write event: %s", exc)
+
+    def attach_log_handler(self) -> None:
+        """Mirror all ace_champion log output into record_dir/run.log."""
+        handler = logging.FileHandler(self.dir / "run.log")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+        logging.getLogger("ace_champion").addHandler(handler)
 
 
 class BoardExecutor:

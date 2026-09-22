@@ -72,6 +72,8 @@ def main() -> int:
                         help="Actually move the mouse (requires pyautogui + macOS Accessibility). Without it, actions are only logged")
     parser.add_argument("--interval", type=float, default=8.0, metavar="S",
                         help="Seconds to sleep between --auto iterations (default 8)")
+    parser.add_argument("--record", nargs="?", const="default", metavar="DIR",
+                        help="Record the run: screen video (macOS screencapture -v) + event log to DIR (default ~/.ace_champion/recordings/<ts>/)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
@@ -217,7 +219,17 @@ def _execute_once(args: argparse.Namespace, state, decision, position) -> int:
 
 
 def _run_auto_loop(args: argparse.Namespace) -> int:
-    from .executor import BoardExecutor, locate_anchors, screenshot
+    from .executor import BoardExecutor, RunRecorder, locate_anchors, screenshot
+
+    recorder = None
+    if args.record is not None:
+        import atexit
+        from pathlib import Path as _Path
+        recorder = RunRecorder(None if args.record == "default" else _Path(args.record))
+        recorder.attach_log_handler()
+        recorder.start_video()
+        atexit.register(recorder.stop_video)   # safety net (Ctrl+C / crashes)
+        logging.getLogger("ace_champion").info("Recording (video + events) to %s", recorder.dir)
 
     session = _open_session(args)
     engine = JevDecisionEngine(api_key=args.api_key, model=args.model)
@@ -234,8 +246,14 @@ def _run_auto_loop(args: argparse.Namespace) -> int:
             state = from_screenshot(frame)
         except (RuntimeError, FileNotFoundError) as exc:
             logging.error("Capture failed: %s — sleeping and retrying", exc)
+            if recorder:
+                recorder.event(iteration=i, stage="capture", error=str(exc))
             time.sleep(args.interval)
             continue
+
+        if recorder:
+            recorder.event(iteration=i, stage="capture", phase=state.phase, turn=state.turn,
+                           hero_health=state.hero.health, hero_tier=state.hero.tier, gold=state.hero.gold)
 
         if state.phase != "shop":
             logging.info("Phase is '%s' (not shop) — waiting", state.phase)
@@ -246,6 +264,8 @@ def _run_auto_loop(args: argparse.Namespace) -> int:
             anchors = locate_anchors(frame)
         except RuntimeError as exc:
             logging.error("Anchor location failed: %s — sleeping and retrying", exc)
+            if recorder:
+                recorder.event(iteration=i, stage="anchors", error=str(exc))
             time.sleep(args.interval)
             continue
 
@@ -255,6 +275,8 @@ def _run_auto_loop(args: argparse.Namespace) -> int:
             decision = engine.decide(ctx_state)
         except Exception as exc:
             logging.error("Jev call failed: %s — sleeping and retrying", exc)
+            if recorder:
+                recorder.event(iteration=i, stage="decide", error=str(exc))
             time.sleep(args.interval)
             continue
 
@@ -270,7 +292,14 @@ def _run_auto_loop(args: argparse.Namespace) -> int:
             print()
             print(format_position_decision(state, position))
 
-        executor.execute(decision, state=state, position=position, anchors=anchors)
+        actions = executor.execute(decision, state=state, position=position, anchors=anchors)
+        if recorder:
+            recorder.event(iteration=i, stage="act",
+                           decision=decision.primary_action, confidence=decision.confidence,
+                           buy_slots=decision.buy_slots, sell_slots=decision.sell_slots,
+                           freeze=decision.freeze_shop,
+                           position_order=position.order if position else None,
+                           actions=[{"name": a.name, "detail": a.detail} for a in actions])
 
         if session is not None:
             session.record_turn(state, decision, position.order if position else None)
@@ -279,6 +308,8 @@ def _run_auto_loop(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
     logging.info("Auto loop finished: %d/%d shop phases acted on", completed, args.auto)
+    if recorder:
+        recorder.stop_video()
     return 0
 
 

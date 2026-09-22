@@ -160,23 +160,57 @@ def _repair_vlm_json(text: str) -> dict[str, Any]:
 
 _DEFAULT_BASE_URL = "https://api.openai.com/v1"
 _DEFAULT_MODEL = "gpt-4o-mini"
-_HTTP_TIMEOUT_SECONDS = 60
+_HTTP_TIMEOUT_SECONDS = int(os.environ.get("ACE_VLM_TIMEOUT", "300"))
 
 
 def _read_image_b64(image: str | Path | bytes) -> tuple[str, str]:
-    """Read image bytes and return (base64_data_url, mime_type).
+    """Read image bytes, downscale if needed, return (base64_data_url, mime_type).
 
     Accepts a file path or raw bytes. PNG/JPEG/WEBP/GIF supported.
+    Downscales large screenshots (e.g. Retina) to ``ACE_VLM_MAX_SIDE``
+    (default 1280) so image tokens fit in Ollama-class local models
+    and cloud models don't bill for megabyte payloads.
     """
+    max_side = int(os.environ.get("ACE_VLM_MAX_SIDE", "1280"))
+    pil_img = None
+
     if isinstance(image, (str, Path)):
         path = Path(image)
         if not path.exists():
             raise FileNotFoundError(f"Screenshot not found: {path}")
-        data = path.read_bytes()
-        ext = path.suffix.lower().lstrip(".")
+        # Try PIL resize first — much smaller payload
+        try:
+            from PIL import Image as _PILImage   # optional dep
+            pil_img = _PILImage.open(path)
+            ext = path.suffix.lower().lstrip(".")
+        except Exception:
+            data = path.read_bytes()
+            ext = path.suffix.lower().lstrip(".")
     else:
         data = image
-        ext = "png"  # assume PNG for raw bytes
+        ext = "png"
+        try:
+            from PIL import Image as _PILImage
+            import io as _io
+            pil_img = _PILImage.open(_io.BytesIO(data))
+        except Exception:
+            pass
+
+    # --- Downscale with PIL when available ---
+    if pil_img is not None:
+        w, h = pil_img.size
+        long_side = max(w, h)
+        if long_side > max_side:
+            scale = max_side / long_side
+            new_size = (int(w * scale), int(h * scale))
+            pil_img = pil_img.resize(new_size, _PILImage.LANCZOS if hasattr(_PILImage, "LANCZOS") else _PILImage.BICUBIC)
+            logger.info("Downscaled image %dx%d → %dx%d", w, h, new_size[0], new_size[1])
+        # Re-encode to JPEG (smaller than PNG)
+        import io as _io
+        buf = _io.BytesIO()
+        pil_img.convert("RGB").save(buf, format="JPEG", quality=82, optimize=True)
+        data = buf.getvalue()
+        ext = "jpg"
 
     mime_map = {
         "png": "image/png",

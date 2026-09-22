@@ -81,7 +81,10 @@ Rules:
 - Board minions: left-to-right order, exactly as on screen.
 - Shop minions: left-to-right order.
 - If a field is illegible, use the documented default (health=30, tier=1, etc.) rather than guessing.
-- Do not include turn, phase, or game_log — the caller fills those.
+- "turn": the turn/round counter if visible in the HUD (top bar), else omit.
+- "phase": "shop" if we're in the shop/recruit phase (shop cards visible, combat not running),
+  "combat" if minions are fighting, "other" otherwise.
+- Do not include game_log — the caller fills those.
 - Output JSON ONLY, no prose, no markdown fences."""
 
 
@@ -187,8 +190,13 @@ def _read_image_b64(image: str | Path | bytes) -> tuple[str, str]:
     return f"data:{mime};base64,{b64}", mime
 
 
-def call_vlm(image: str | Path | bytes) -> dict[str, Any]:
+def call_vlm(image: str | Path | bytes, prompt: str | None = None) -> dict[str, Any]:
     """Send a screenshot to the configured VLM and return the parsed dict.
+
+    Args:
+        image: file path or raw image bytes.
+        prompt: system prompt override. Defaults to the Battlegrounds
+            game-state schema prompt.
 
     Requires env vars:
       - ``VLM_API_KEY``  (required)
@@ -215,7 +223,7 @@ def call_vlm(image: str | Path | bytes) -> dict[str, Any]:
         "messages": [
             {
                 "role": "system",
-                "content": _VLM_SCHEMA_PROMPT,
+                "content": prompt if prompt is not None else _VLM_SCHEMA_PROMPT,
             },
             {
                 "role": "user",

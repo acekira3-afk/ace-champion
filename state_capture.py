@@ -12,10 +12,11 @@ Three capture modes are supported, each in its own function:
    agent).
 2. :func:`from_sample` — use the built-in :func:`sample_state` fixture. Zero setup,
    great for smoke-testing the decision engine.
-3. :func:`from_screenshot` — **TODO**: feed a screenshot through a VLM to extract
-   the state. The VLM call and JSON-shape correction happen here; downstream code
-   never sees raw image data. This is a stubs-only placeholder for now — the full
-   implementation will use the project's Computer Use Agent (CUA) + vision model.
+3. :func:`from_screenshot` — feed a screenshot through an OpenAI-compatible
+   vision model (:func:`ace_champion.vision.call_vlm`) to extract the state.
+   The VLM call and JSON-shape correction happen in :mod:`ace_champion.vision`;
+   this function is a thin wrapper that normalizes the returned dict into a
+   :class:`GameState` via :func:`_dict_to_state`. Requires ``VLM_API_KEY`` env var.
 
 All three functions return the same :class:`GameState` type, so callers don't care
 which capture mode produced it.
@@ -55,23 +56,28 @@ def from_sample() -> GameState:
     return sample_state()
 
 
-def from_screenshot(image_path: str | Path) -> GameState:
-    """Extract a :class:`GameState` from a screenshot via VLM.
+def from_screenshot(image: str | Path | bytes) -> GameState:
+    """Extract a :class:`GameState` from a screenshot via vision model.
 
-    **Placeholder** — the full implementation will:
+    Sends the image to an OpenAI-compatible VLM through
+    :func:`ace_champion.vision.call_vlm`, then normalizes the returned dict
+    via :func:`_dict_to_state`.
 
-    1. Send the image to a vision-capable model (e.g. GPT-4o, Claude Sonnet).
-    2. Ask it to produce JSON matching :meth:`GameState.to_json_state`.
-    3. Validate and correct the JSON shape (fill defaults, drop unknown keys).
-    4. Return a :class:`GameState`.
+    Args:
+        image: Path to a PNG/JPEG/WEBP/GIF screenshot, or raw image bytes.
 
-    For now this raises :class:`NotImplementedError` so callers know the feature
-    is coming but not yet usable.
+    Requires env vars (see :mod:`ace_champion.vision`):
+        ``VLM_API_KEY`` (required), ``VLM_BASE_URL`` (default
+        ``https://api.openai.com/v1``), ``VLM_MODEL`` (default ``gpt-4o-mini``).
+
+    Raises:
+        RuntimeError: if the API key is missing, the HTTP call fails, or the
+            VLM returns non-JSON output. Never returns a silent empty state.
+        FileNotFoundError: if ``image`` is a path that does not exist.
     """
-    raise NotImplementedError(
-        "Screenshot capture is not yet wired up. "
-        "Use from_json() or from_sample() for now, or implement the VLM call here."
-    )
+    from .vision import call_vlm
+    data = call_vlm(image)
+    return _dict_to_state(data)
 
 
 # --------------------------------------------------------------------------- #

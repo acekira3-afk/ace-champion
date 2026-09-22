@@ -13,6 +13,11 @@ Design separation: **state schema** (deterministic JSON) → **Jev judgments** (
 ```bash
 pip install typesafe-sdk
 export TYPESAFE_API_KEY=tsk-xxxx  # get one from https://typesafe.ai
+
+# Only needed for screenshot capture (from_screenshot):
+export VLM_API_KEY=sk-xxxx                          # OpenAI-compatible API key
+export VLM_MODEL=gpt-4o-mini                        # default; use gpt-4o for better minion names
+export VLM_BASE_URL=https://api.openai.com/v1       # default; change for Azure/ollama/etc.
 ```
 
 ## Usage
@@ -26,6 +31,9 @@ python -m ace_champion --sample
 
 # Feed your own JSON game state
 python -m ace_champion --state state.json
+
+# Parse a Battlegrounds screenshot via VLM (requires VLM_API_KEY)
+python -m ace_champion --screenshot screenshot.png
 
 # Pretty-print only the JSON state
 python -m ace_champion --sample --dump-state
@@ -41,7 +49,8 @@ ace_champion/
 ├── __init__.py              # Package metadata
 ├── __main__.py              # CLI entry point
 ├── battlegrounds_state.py   # GameState / Minion / HeroState dataclasses
-├── state_capture.py         # JSON → GameState + sample fixture
+├── state_capture.py         # JSON/sample/screenshot → GameState
+├── vision.py                # VLM bridge: screenshot → dict (OpenAI-compatible HTTP)
 └── decision_engine.py       # Jev question builder + PlayDecision compositor
 ```
 
@@ -52,6 +61,6 @@ ace_champion/
 - [x] Choice questions for shop/board slot selection
 - [x] Score questions for board strength and shop quality
 - [x] Hard-rule composition into final PlayDecision
-- [ ] Screenshot → GameState via VLM (`from_screenshot()`)
+- [x] Screenshot → GameState via VLM (`from_screenshot()`)
 - [ ] Battle-phase positioning recommendations
 - [ ] Turn-over-turn memory (opponent tracking, trend analysis)

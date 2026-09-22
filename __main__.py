@@ -12,7 +12,8 @@ Usage examples::
     # 3. Run against a JSON file you prepared
     python -m ace_champion --state state.json
 
-    # 4. Run against a screenshot (once VLM capture is wired up)
+    # 4. Run against a screenshot (requires VLM_API_KEY env var)
+    export VLM_API_KEY=sk-xxxx
     python -m ace_champion --screenshot screenshot.png
 
     # 5. Pretty-print only the JSON state that would be sent to Jev
@@ -26,7 +27,7 @@ import json
 import logging
 import sys
 
-from .state_capture import from_json, from_sample
+from .state_capture import from_json, from_sample, from_screenshot
 from .decision_engine import JevDecisionEngine, format_decision
 
 
@@ -38,7 +39,7 @@ def main() -> int:
     input_group = parser.add_mutually_exclusive_group()
     input_group.add_argument("--sample", action="store_true", help="Use built-in sample state")
     input_group.add_argument("--state", type=str, help="Path to a JSON game-state file")
-    # --screenshot reserved for when from_screenshot() is implemented
+    input_group.add_argument("--screenshot", type=str, help="Path to a Battlegrounds screenshot (PNG/JPEG/WEBP) for VLM parsing")
 
     parser.add_argument("--api-key", type=str, default=None, help="TypeSafe API key (defaults to $TYPESAFE_API_KEY)")
     parser.add_argument("--model", type=str, default="jev-latest", help="Jev model alias (default: jev-latest)")
@@ -54,13 +55,19 @@ def main() -> int:
     )
 
     # --- Resolve input state ------------------------------------------------
-    if args.sample:
-        state = from_sample()
-    elif args.state:
-        state = from_json(args.state)
-    else:
-        parser.print_help()
-        return 1
+    try:
+        if args.sample:
+            state = from_sample()
+        elif args.state:
+            state = from_json(args.state)
+        elif args.screenshot:
+            state = from_screenshot(args.screenshot)
+        else:
+            parser.print_help()
+            return 1
+    except (RuntimeError, FileNotFoundError) as exc:
+        logging.error("State capture failed: %s", exc)
+        return 3
 
     # --- --dump-state mode --------------------------------------------------
     if args.dump_state:

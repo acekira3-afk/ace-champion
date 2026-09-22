@@ -36,7 +36,7 @@ from .battlegrounds_state import (
 )
 
 
-logger = logging.getLogger("jev_battlegrounds.capture")
+logger = logging.getLogger("ace_champion.capture")
 
 
 def from_json(path: str | Path) -> GameState:

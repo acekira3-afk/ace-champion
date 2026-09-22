@@ -1,22 +1,22 @@
-"""CLI entry point for the Jev Battlegrounds decision engine.
+"""CLI entry point for the Ace Champion decision engine.
 
 Usage examples::
 
     # 1. Run against the built-in sample state (no API call)
-    python -m jev_battlegrounds --sample --dry-run
+    python -m ace_champion --sample --dry-run
 
     # 2. Run against sample state with a real Jev API call
     export TYPESAFE_API_KEY=tsk-xxxx
-    python -m jev_battlegrounds --sample
+    python -m ace_champion --sample
 
     # 3. Run against a JSON file you prepared
-    python -m jev_battlegrounds --state state.json
+    python -m ace_champion --state state.json
 
     # 4. Run against a screenshot (once VLM capture is wired up)
-    python -m jev_battlegrounds --screenshot screenshot.png
+    python -m ace_champion --screenshot screenshot.png
 
     # 5. Pretty-print only the JSON state that would be sent to Jev
-    python -m jev_battlegrounds --sample --dump-state
+    python -m ace_champion --sample --dump-state
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from .decision_engine import JevDecisionEngine, format_decision
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="jev_battlegrounds",
+        prog="ace_champion",
         description="Jev-driven decision engine for Hearthstone Battlegrounds.",
     )
     input_group = parser.add_mutually_exclusive_group()

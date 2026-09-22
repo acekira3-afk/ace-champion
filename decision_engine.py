@@ -35,7 +35,7 @@ except ImportError:  # pragma: no cover - SDK must be installed to use this modu
 from .battlegrounds_state import GameState, Minion
 
 
-logger = logging.getLogger("jev_battlegrounds.decision")
+logger = logging.getLogger("ace_champion.decision")
 
 
 # --------------------------------------------------------------------------- #
